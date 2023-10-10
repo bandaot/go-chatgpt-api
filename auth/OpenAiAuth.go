@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -41,14 +42,16 @@ type Result struct {
 }
 
 const (
+	defaultPrefix 	                   = "https://ai-%s.fakeopen.com"
 	defaultErrorMessageKey             = "errorMessage"
 	AuthorizationHeader                = "Authorization"
 	XAuthorizationHeader               = "X-Authorization"
 	ContentType                        = "application/x-www-form-urlencoded"
-	UserAgent                          = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
+	UserAgent                          = "ChatGPTApp/1490 CFNetwork/1410.0.3 Darwin/22.6.0"
 	Auth0Url                           = "https://auth0.openai.com"
 	LoginUsernameUrl                   = Auth0Url + "/u/login/identifier?state="
 	LoginPasswordUrl                   = Auth0Url + "/u/login/password?state="
+	AuthTokenUrl                       = Auth0Url + "/oauth/token"
 	ParseUserInfoErrorMessage          = "Failed to parse user login info."
 	GetAuthorizedUrlErrorMessage       = "Failed to get authorized url."
 	GetStateErrorMessage               = "Failed to get state."
@@ -62,6 +65,8 @@ const (
 	promptLoginUrl           = "https://chat.openai.com/api/auth/signin/auth0?prompt=login"
 	getCsrfTokenErrorMessage = "Failed to get CSRF token."
 	authSessionUrl           = "https://chat.openai.com/api/auth/session"
+	code_challenge           = "ne-n5bA7hslzCq0ZUfJW0LjLEusAsn-Hc4u1n8m32eQ"
+    code_verifier            = "ndYNRSJaqtW60RC_ldZHYhbT5JN1xZxNiKBNvw6I-Ns"
 )
 
 type UserLogin struct {
@@ -69,6 +74,11 @@ type UserLogin struct {
 	Password string
 	client   tls_client.HttpClient
 	Result   Result
+}
+
+func defaultApiPrefix() string {
+	yesterday := time.Now().AddDate(0, 0, -1)
+	return fmt.Sprintf(defaultPrefix, yesterday.Format("20060102"))
 }
 
 //goland:noinspection GoUnhandledErrorResult,SpellCheckingInspection
@@ -100,28 +110,49 @@ func NewAuthenticator(emailAddress, password, proxy string) *UserLogin {
 }
 
 //goland:noinspection GoUnhandledErrorResult,GoErrorStringFormat
-func (userLogin *UserLogin) GetAuthorizedUrl(csrfToken string) (string, int, error) {
-	form := url.Values{
-		"callbackUrl": {"/"},
-		"csrfToken":   {csrfToken},
-		"json":        {"true"},
-	}
-	req, err := http.NewRequest(http.MethodPost, promptLoginUrl, strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", ContentType)
-	req.Header.Set("User-Agent", UserAgent)
-	resp, err := userLogin.client.Do(req)
-	if err != nil {
-		return "", http.StatusInternalServerError, err
-	}
+func (userLogin *UserLogin) GetAuthorizedUrl(preauth string) (string) {
+	baseURL := "https://auth0.openai.com/authorize"
+	
+	params := url.Values{}
+	params.Add("ios_app_version", "1490")
+	params.Add("client_id", "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh")
+	params.Add("auth0Client", "eyJlbnYiOnsiaU9TIjoiMTYuNiIsInN3aWZ0IjoiNS54In0sIm5hbWUiOiJBdXRoMC5zd2lmdCIsInZlcnNpb24iOiIyLjMuMiJ9")
+	params.Add("audience", "https://api.openai.com/v1")
+	params.Add("redirect_uri", "com.openai.chat://auth0.openai.com/ios/com.openai.chat/callback")
+	params.Add("scope", "openid email profile offline_access model.request model.read organization.read offline")
+	params.Add("response_type", "code")
+	params.Add("code_challenge", code_challenge)
+	params.Add("code_challenge_method", "S256")
+	params.Add("prompt", "login")
+	params.Add("preauth_cookie", preauth)
+	params.Add("ios_device_id", "9806ED3F-D165-451F-A669-3ED531CFF18E")
+	params.Add("state", "76mpoSWxHWGaZJvSkFSLvrMf2owL_3WFDUhBJgQRiYU")
 
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", resp.StatusCode, errors.New(GetAuthorizedUrlErrorMessage)
-	}
 
-	responseMap := make(map[string]string)
-	json.NewDecoder(resp.Body).Decode(&responseMap)
-	return responseMap["url"], http.StatusOK, nil
+	authUrl := baseURL + "?" + params.Encode()
+	return authUrl
+	// req, err := http.NewRequest(http.MethodGet, authUrl, nil)
+	// req.Header.Set("Content-Type", ContentType)
+	// req.Header.Set("User-Agent", UserAgent)
+	
+	// resp, err := userLogin.client.Do(req)
+	// if err != nil {
+	// 	return "", http.StatusInternalServerError, err
+	// }
+
+	// defer resp.Body.Close()
+	// if resp.StatusCode != http.StatusOK {
+	// 	return "", resp.StatusCode, errors.New(GetAuthorizedUrlErrorMessage)
+	// }
+
+	// urlParams, _ := url.ParseQuery(resp.Request.URL.RawQuery)
+
+	// states, _ := urlParams["state"]
+	// state := states[0]
+
+	// responseMap := make(map[string]string)
+	// json.NewDecoder(resp.Body).Decode(&responseMap)
+	// return responseMap["url"], http.StatusOK, nil
 }
 
 //goland:noinspection GoUnhandledErrorResult,GoErrorStringFormat
@@ -129,6 +160,7 @@ func (userLogin *UserLogin) GetState(authorizedUrl string) (string, int, error) 
 	req, err := http.NewRequest(http.MethodGet, authorizedUrl, nil)
 	req.Header.Set("Content-Type", ContentType)
 	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Referer", "https://ios.chat.openai.com/")
 	resp, err := userLogin.client.Do(req)
 	if err != nil {
 		return "", http.StatusInternalServerError, err
@@ -139,8 +171,9 @@ func (userLogin *UserLogin) GetState(authorizedUrl string) (string, int, error) 
 		return "", resp.StatusCode, errors.New(GetStateErrorMessage)
 	}
 
-	doc, _ := goquery.NewDocumentFromReader(resp.Body)
-	state, _ := doc.Find("input[name=state]").Attr("value")
+	urlParams, _ := url.ParseQuery(resp.Request.URL.RawQuery)
+	states, _ := urlParams["state"]
+	state := states[0]
 	return state, http.StatusOK, nil
 }
 
@@ -158,6 +191,8 @@ func (userLogin *UserLogin) CheckUsername(state string, username string) (int, e
 	req, _ := http.NewRequest(http.MethodPost, LoginUsernameUrl+state, strings.NewReader(formParams.Encode()))
 	req.Header.Set("Content-Type", ContentType)
 	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Referer", LoginUsernameUrl+state)
+	req.Header.Set("Origin", "https://auth0.openai.com")
 	resp, err := userLogin.client.Do(req)
 	if err != nil {
 		return http.StatusInternalServerError, err
@@ -195,6 +230,8 @@ func (userLogin *UserLogin) CheckPassword(state string, username string, passwor
 	req, err := http.NewRequest(http.MethodPost, LoginPasswordUrl+state, strings.NewReader(formParams.Encode()))
 	req.Header.Set("Content-Type", ContentType)
 	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Referer", LoginPasswordUrl+state)
+	req.Header.Set("Origin", "https://auth0.openai.com")
 	userLogin.client.SetFollowRedirect(false)
 	resp, err := userLogin.client.Do(req)
 	if err != nil {
@@ -213,8 +250,11 @@ func (userLogin *UserLogin) CheckPassword(state string, username string, passwor
 	}
 
 	if resp.StatusCode == http.StatusFound {
-		req, _ := http.NewRequest(http.MethodGet, Auth0Url+resp.Header.Get("Location"), nil)
+		location := resp.Header.Get("Location")
+		println("Location1: " + location)
+		req, _ := http.NewRequest(http.MethodGet, Auth0Url+location, nil)
 		req.Header.Set("User-Agent", UserAgent)
+		req.Header.Set("Referer", Auth0Url+location)
 		resp, err := userLogin.client.Do(req)
 		if err != nil {
 			return "", http.StatusInternalServerError, err
@@ -223,31 +263,62 @@ func (userLogin *UserLogin) CheckPassword(state string, username string, passwor
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusFound {
 			location := resp.Header.Get("Location")
+			println("Location2: " + location)
 			if strings.HasPrefix(location, "/u/mfa-otp-challenge") {
 				return "", http.StatusBadRequest, errors.New("Login with two-factor authentication enabled is not supported currently.")
 			}
 
-			req, _ := http.NewRequest(http.MethodGet, location, nil)
+			parsedURL, err := url.Parse(location)
+			if err != nil {
+				fmt.Println("Error parsing URL:", err)
+				return "", http.StatusInternalServerError, err
+			}
+
+			queryParams := parsedURL.Query()
+			code := queryParams.Get("code")
+
+			fmt.Println("Code:", code)
+
+			jsonParams := map[string]string{
+				"code_verifier": code_verifier,
+				"redirect_uri": "com.openai.chat://auth0.openai.com/ios/com.openai.chat/callback",
+				"code": code,
+				"client_id": "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh",
+				"grant_type": "authorization_code",
+			}
+
+			jsonBody, err := json.Marshal(jsonParams)
+			if err != nil {
+				println("Error: " + err.Error())
+				return "", http.StatusInternalServerError, err
+			}
+			content := string(jsonBody)
+			// println(content)
+			req, _ := http.NewRequest(http.MethodPost, AuthTokenUrl, strings.NewReader(content))
+			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("User-Agent", UserAgent)
 			resp, err := userLogin.client.Do(req)
 			if err != nil {
+				println("Error: " + err.Error())
 				return "", http.StatusInternalServerError, err
 			}
 
 			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusFound {
-				return "", http.StatusOK, nil
+
+			if resp.StatusCode != http.StatusOK {
+				fmt.Println("Status code:", resp.StatusCode)
+				return "", resp.StatusCode, errors.New(GetAccessTokenErrorMessage)
 			}
 
-			if resp.StatusCode == http.StatusTemporaryRedirect {
-				errorDescription := req.URL.Query().Get("error_description")
-				if errorDescription != "" {
-					return "", resp.StatusCode, errors.New(errorDescription)
-				}
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Println("Error reading response body:", err)
+				return "", resp.StatusCode, err
 			}
+
+			// fmt.Println("Status code:", resp.StatusCode)
 			
-			println("Error: " + resp.Status)
-			return "", resp.StatusCode, errors.New(GetAccessTokenErrorMessage)
+			return string(bodyBytes), resp.StatusCode, nil;
 		}
 
 		return "", resp.StatusCode, errors.New(EmailOrPasswordInvalidErrorMessage)
@@ -287,18 +358,19 @@ func (userLogin *UserLogin) GetAccessTokenInternal(code string) (string, int, er
 	return result["accessToken"].(string), http.StatusOK, nil
 }
 
-func (userLogin *UserLogin) Begin() *Error {
-	_, err, token := userLogin.GetToken()
+func (userLogin *UserLogin) Begin() (string, *Error) {
+	_, err, result := userLogin.GetToken()
 	if err != "" {
-		return NewError("begin", 0, err)
+		return "", NewError("begin", 0, err)
 	}
-	userLogin.Result.AccessToken = token
-	return nil
+	userLogin.Result.AccessToken = result
+	return result, nil
 }
 
 func (userLogin *UserLogin) GetToken() (int, string, string) {
-	// get csrf token
-	req, _ := http.NewRequest(http.MethodGet, csrfUrl, nil)
+	// get preauth_cookie
+	url := fmt.Sprintf(defaultApiPrefix()+"/auth/preauth")
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("User-Agent", UserAgent)
 	resp, err := userLogin.client.Do(req)
 	if err != nil {
@@ -321,13 +393,12 @@ func (userLogin *UserLogin) GetToken() (int, string, string) {
 	// get authorized url
 	responseMap := make(map[string]string)
 	json.NewDecoder(resp.Body).Decode(&responseMap)
-	authorizedUrl, statusCode, err := userLogin.GetAuthorizedUrl(responseMap["csrfToken"])
-	if err != nil {
-		return statusCode, err.Error(), ""
-	}
+	authorizedUrl := userLogin.GetAuthorizedUrl(responseMap["preauth_cookie"])
+	println(authorizedUrl)
 
 	// get state
 	state, statusCode, err := userLogin.GetState(authorizedUrl)
+	println(state)
 	if err != nil {
 		return statusCode, err.Error(), ""
 	}
@@ -345,18 +416,14 @@ func (userLogin *UserLogin) GetToken() (int, string, string) {
 	}
 
 	// check password
-	_, statusCode, err = userLogin.CheckPassword(state, userLogin.Username, userLogin.Password)
+	result, statusCode, err := userLogin.CheckPassword(state, userLogin.Username, userLogin.Password)
 	if err != nil {
 		return statusCode, err.Error(), ""
 	}
 
-	// get access token
-	accessToken, statusCode, err := userLogin.GetAccessTokenInternal("")
-	if err != nil {
-		return statusCode, err.Error(), ""
-	}
+	// println(result)
 
-	return http.StatusOK, "", accessToken
+	return http.StatusOK, "", result
 }
 
 func (userLogin *UserLogin) GetAccessToken() string {
