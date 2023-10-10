@@ -13,10 +13,9 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/gin-gonic/gin"
-	"github.com/xqdoo00o/OpenAIAuth/auth"
-	"github.com/xqdoo00o/funcaptcha"
-
+	"github.com/linweiyuan/go-chatgpt-api/auth"
 	"github.com/linweiyuan/go-logger/logger"
+	"github.com/xqdoo00o/funcaptcha"
 )
 
 const (

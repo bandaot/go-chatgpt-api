@@ -3,9 +3,9 @@ package chatgpt
 import (
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/gin-gonic/gin"
-	"github.com/xqdoo00o/OpenAIAuth/auth"
 
 	"github.com/linweiyuan/go-chatgpt-api/api"
+	"github.com/linweiyuan/go-chatgpt-api/auth"
 )
 
 func Login(c *gin.Context) {

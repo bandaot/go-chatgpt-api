@@ -9,4 +9,5 @@ COPY --from=builder /app/go-chatgpt-api .
 RUN apk add --no-cache tzdata
 ENV TZ=Asia/Shanghai
 EXPOSE 8080
+COPY ./chat.openai.com.har /app/chat.openai.com.har
 CMD ["/app/go-chatgpt-api"]
