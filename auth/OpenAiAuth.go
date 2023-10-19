@@ -358,13 +358,13 @@ func (userLogin *UserLogin) GetAccessTokenInternal(code string) (string, int, er
 	return result["accessToken"].(string), http.StatusOK, nil
 }
 
-func (userLogin *UserLogin) Begin() (string, *Error) {
+func (userLogin *UserLogin) Begin() (*Error) {
 	_, err, result := userLogin.GetToken()
 	if err != "" {
-		return "", NewError("begin", 0, err)
+		return NewError("begin", 0, err)
 	}
 	userLogin.Result.AccessToken = result
-	return result, nil
+	return nil
 }
 
 func (userLogin *UserLogin) GetToken() (int, string, string) {
